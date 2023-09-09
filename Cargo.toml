@@ -1,0 +1,14 @@
+[package]
+name = "fiber-runtime"
+version = "0.1.0"
+edition = "2021"
+authors = ["CubicYYY<yyy2015c01@gmail.com>"]
+
+[dependencies]
+crossbeam-channel = "0.5"
+futures = "0.3"
+sha1 = "0.6" # for heavy load example
+
+
+[[example]]
+name = "sleep"
