@@ -1,3 +1,4 @@
+// Credit: https://rust-lang.github.io/async-book/02_execution/03_wakeups.html
 use std::{
     future::Future,
     pin::Pin,

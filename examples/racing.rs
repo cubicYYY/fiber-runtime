@@ -9,10 +9,9 @@ fn main() {
     let (executor, spawner) = new_executor_and_spawner();
 
     // Spawn a task to print before and after waiting on a timer.
-    for i in 0..256 {
-        let cloned = spawner.clone();
-        cloned.spawn(async move {
-            TimerFuture::new(Duration::from_secs(1)).await;
+    for i in 0..512 {
+        spawner.spawn(async move {
+            TimerFuture::new(Duration::from_secs(0)).await;
             println!("{} done by {:?}", i, thread::current().id());
         });
     }

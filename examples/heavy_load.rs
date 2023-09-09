@@ -1,9 +1,9 @@
 use std::{
-    thread::{self, available_parallelism, JoinHandle},
-    time::Duration,
+    thread::{self, available_parallelism},
+    time::Instant,
 };
 
-use fiber_runtime::{executor::new_executor_and_spawner, timer_future::TimerFuture};
+use fiber_runtime::executor::new_executor_and_spawner;
 use sha1::Sha1;
 
 fn cpu_bounded_job() {
@@ -17,15 +17,28 @@ fn cpu_bounded_job() {
     println!("SHA-1 hash: {}", hasher.digest());
 }
 fn main() {
+    println!("===SINGLE===");
+    let start_time = Instant::now();
+    for _ in 0..3 {
+        // 3 jobs
+        cpu_bounded_job();
+    }
+    println!(
+        "Single thread time per job: {}ms",
+        start_time.elapsed().as_millis() / 3
+    );
+
+    println!("============");
+    println!(
+        "===MULTI===[parallelism={}]",
+        available_parallelism().unwrap().get()
+    );
     let (executor, spawner) = new_executor_and_spawner();
 
-    // Spawn a task to print before and after waiting on a timer.
-    for i in 0..4 {
-        let cloned = spawner.clone();
-        cloned.spawn(async move {
-            println!("Task {}: will start after 1 seconds.", i);
-            // Wait for our timer future to complete after two seconds.
-            TimerFuture::new(Duration::from_secs(1)).await;
+    let start_time = Instant::now();
+    for i in 0..available_parallelism().unwrap().get() * 3 {
+        // each thread should get 3 jobs
+        spawner.spawn(async move {
             println!("Task {} started by {:?}.", i, thread::current().id());
             cpu_bounded_job();
             println!("Task {} done!", i);
@@ -35,7 +48,7 @@ fn main() {
     // No more jobs
     drop(spawner);
 
-    let mut threads: Vec<JoinHandle<_>> = vec![];
+    let mut threads = vec![];
     for _ in 0..available_parallelism().unwrap().get() {
         let cloned = executor.clone();
         threads.push(thread::spawn(move || {
@@ -47,4 +60,9 @@ fn main() {
     for handle in threads {
         handle.join().expect("Thread panicked!");
     }
+    println!(
+        "Multi-thread async time per job: {}ms",
+        start_time.elapsed().as_millis() / available_parallelism().unwrap().get() as u128 / 3
+    );
+    println!("======");
 }
