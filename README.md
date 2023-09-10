@@ -33,11 +33,12 @@ You can use crate `with_locals` to do Continuation-Passing Style(CPS) programmin
 - `cargo run --release --example heavy_load`  Multiple threads running CPU intensive works, showing little idle time & overhead for a worker thread
 - `cargo run --release --example benchmark`  Compare with Tokio (not so fair actually)
 - `cargo run --release --example macros`  See how to use macros (some are from `futures`), and see how tasks got dropped if not finished in `select!`
+- `cargo run --release --example memory_usage`  Test memory usage
 
 ## Features / Advantages / Optimizations
 
 - No Mutex
-- Light-weighted (no long spinning)
+- Light-weighted (no long spinning, ~140 Bytes memory overhead per future)
 - **Accepts non `()` return value from future**, with dynamic typing
 - Optimized for running one task only (so you get a higher performance if futures are combined)
 - Easy-to-use macro(s)
