@@ -54,4 +54,8 @@ Thread-per-core is recommended, as they are equivalently accepting tasks if avai
 
 ### Benchmarks
 
-TODO
+### Block on Many Futures
+![benchmark1](statics/benchmark1.png)
+
+### Block on Many Futures, with `--release` enabled
+![benchmark2](statics/benchmark2.png)
