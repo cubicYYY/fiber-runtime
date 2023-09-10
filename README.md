@@ -16,7 +16,7 @@ You can use crate `with_locals` to do Continuation-Passing Style(CPS) programmin
 ## Examples
 
 `cargo run --example min`  Minimal example  
-`cargo run --example return_value`  Async with non `()` return value
+`cargo run --example return_value`  Async with non `()` return value  
 `cargo run --example sleep`  Async sleep example  
 `cargo run --release --example racing`  Multiple threads running light works, found no racing of Task  
 `cargo run --release --example heavy_load`  Multiple threads running CPU intensive works, showing little idle time & overhead for a worker thread
@@ -25,18 +25,18 @@ You can use crate `with_locals` to do Continuation-Passing Style(CPS) programmin
 
 - No Mutex
 - Light-weighted (no long spinning)
-- **Accepts non `()` return value from future**, with dynamic type
-- Optimized for running one task only (so you get a higher performance if futures are conbined)
+- **Accepts non `()` return value from future**, with dynamic typing
+- Optimized for running one task only (so you get a higher performance if futures are combined)
 
 ## Design
 
-Signal wakeup via MPMC channel provided by crossbeam.  
-Spawner(as producer) spawn tasks from futures, poll the channel dispatch tasks to each Executor(as consumer) running on each thread.  
-You may wonder why there is no Signal to wait for, but it is actually an encapsulation of a real operating system SIG. In this implementaion, the SIG is handled by the thread::park(), called by channel receiver, more efficiently.
+Signal wakeup via MPMC channel provided by `crossbeam`.  
+Spawner(as producer) spawns tasks from futures, polls the channel, dispatches tasks to each Executor(as consumer) running on each thread.  
+You may wonder why there is no Signal to wait for, but it is an encapsulation of a real operating system SIG. In this implementation, the SIG is handled by the thread::park(), called by the channel receiver, more efficiently.
 
 ### Polling of the channel
 
-Blocks the thread. It will spin for a very short time (**try to avoid expensive syscall**), then (if there's no new task in channel) call thread::park() to hang the thread until the OS wake it up.  
+Blocks the thread. It will spin for a very short time (**try to avoid expensive syscall**), then (if there's no new task in the channel) call thread::park() to hang the thread until the OS wakes it up.  
 For Unix/FreeBSD/Android, this process is done by futex(fast userspace mutex) primitive, which is **faster than the version implemented by conditional variables(Condvar)**.  
 Thread-per-core is recommended, as they are equivalently accepting tasks if available.
 
