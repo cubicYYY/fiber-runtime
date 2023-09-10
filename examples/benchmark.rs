@@ -6,7 +6,7 @@ use tokio::spawn;
 
 #[tokio::main]
 async fn main() {
-    const TASK_NUM: u32 = 32768;
+    const TASK_NUM: u32 = 262144;
     println!("===MY IMPL===");
     let start_time = Instant::now();
     // Spawn a task to print before and after waiting on a timer.
@@ -19,10 +19,7 @@ async fn main() {
         });
     }
 
-    println!(
-        "===Time: {}ms ===",
-        start_time.elapsed().as_millis()
-    );
+    println!("===Time: {}ms ===", start_time.elapsed().as_millis());
 
     println!("===TOKIO===");
     let start_time = Instant::now();
@@ -32,10 +29,8 @@ async fn main() {
             let bytes = data.as_bytes();
             let hasher = Sha1::from(bytes);
             let _ = Sha1::from(hasher.digest().bytes());
-        }).await;
+        })
+        .await;
     }
-    println!(
-        "===Time: {}ms ===",
-        start_time.elapsed().as_millis()
-    );
+    println!("===Time: {}ms ===", start_time.elapsed().as_millis());
 }

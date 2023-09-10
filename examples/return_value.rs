@@ -1,5 +1,5 @@
 use fiber_runtime::executor::block_on;
-async fn demo(i: u32) -> u32{
+async fn demo(i: u32) -> u32 {
     println!("Hello world");
     i + 42
 }
@@ -9,8 +9,8 @@ fn main() {
             let a = demo(i).await;
             println!("{}", a);
             a * 2
-        }); 
-        println!("res= {}", res);    
+        });
+        println!("res= {}", res);
     }
     println!("Bye");
 }

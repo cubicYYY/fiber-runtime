@@ -10,8 +10,7 @@ fn main() {
 
     // Spawn a task to print before and after waiting on a timer.
     for i in 0..4 {
-        let cloned = spawner.clone();
-        cloned.spawn(async move {
+        spawner.spawn(async move {
             println!("Task {}: will start after {} seconds.", i, 5 - i);
             // Wait for our timer future to complete after two seconds.
             TimerFuture::new(Duration::from_secs(5 - i)).await;

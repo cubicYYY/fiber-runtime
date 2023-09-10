@@ -7,19 +7,32 @@ A light-weighted async runtime for multithreads. Like fibers/green threads.
 ## Usage
 
 ```rust
-let universe = block_on(async {42});
-assert_eq!(universe, 42);
+use fiber_runtime::fiber_main;
+
+async fn demo() {
+    println!("Hello world");
+}
+fiber_main! {
+    let universe = async {
+        demo().await;
+        println!("done demo");
+        42
+    }.await;
+    assert_eq!(universe, 42);
+}
 ```
 See examples for more.  
 You can use crate `with_locals` to do Continuation-Passing Style(CPS) programming, like what you will do in JavaScript.  
 
 ## Examples
 
-`cargo run --example min`  Minimal example  
-`cargo run --example return_value`  Async with non `()` return value  
-`cargo run --example sleep`  Async sleep example  
-`cargo run --release --example racing`  Multiple threads running light works, found no racing of Task  
-`cargo run --release --example heavy_load`  Multiple threads running CPU intensive works, showing little idle time & overhead for a worker thread
+- `cargo run --example min`  Minimal example  
+- `cargo run --example return_value`  Async with non `()` return value  
+- `cargo run --example sleep`  Async sleep example  
+- `cargo run --release --example racing`  Multiple threads running light works, found no racing of Task  
+- `cargo run --release --example heavy_load`  Multiple threads running CPU intensive works, showing little idle time & overhead for a worker thread
+- `cargo run --release --example benchmark`  Compare with Tokio (not so fair actually)
+- `cargo run --release --example macros`  See how to use macros (some are from `futures`), and see how tasks got dropped if not finished in `select!`
 
 ## Features / Advantages / Optimizations
 
@@ -27,6 +40,7 @@ You can use crate `with_locals` to do Continuation-Passing Style(CPS) programmin
 - Light-weighted (no long spinning)
 - **Accepts non `()` return value from future**, with dynamic typing
 - Optimized for running one task only (so you get a higher performance if futures are combined)
+- Easy-to-use macro(s)
 
 ## Design
 
@@ -44,11 +58,6 @@ Thread-per-core is recommended, as they are equivalently accepting tasks if avai
 
 ### TODOs
 
-- Convenient macros
-  - block_on!
-  - join!
-  - select!
-  - async main
 - Combinators like `.then()` `.and_then()` `.map()`
 - Worker pool
 

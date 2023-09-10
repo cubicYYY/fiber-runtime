@@ -47,10 +47,12 @@ impl ArcWake for Task {
     fn wake_by_ref(arc_self: &Arc<Self>) {
         // Push self back to the task queue
         let cloned = arc_self.clone();
-        arc_self
-            .loopback_entrance
-            .send(cloned)
-            .expect("Task queue full!");
+        match arc_self.loopback_entrance.send(cloned) {
+            Ok(_) => (),
+            Err(_) => {
+                println!("[DEBUG] Unfinished task dropped.");
+            }
+        }
     }
 }
 
@@ -107,7 +109,7 @@ impl Executor {
         }
     }
 
-    pub fn run_once(&self) -> SendableResult{
+    pub fn run_once(&self) -> SendableResult {
         while let Ok(task) = self.task_queue.recv() {
             let mut future_slot = task.future.borrow_mut(); // The only position where a future unboxing occured.
             if let Some(mut future) = future_slot.take() {
