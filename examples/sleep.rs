@@ -6,7 +6,7 @@ async fn demo() {
     println!("Hello world");
 }
 fn main() {
-    let (executor, spawner) = new_executor_and_spawner();
+    let (executor, spawner) = new_executor_and_spawner(0);
 
     // Spawn a task to print before and after waiting on a timer.
     for i in 0..4 {
@@ -24,5 +24,5 @@ fn main() {
     // No more jobs
     drop(spawner);
 
-    executor.run();
+    executor.run(None);
 }

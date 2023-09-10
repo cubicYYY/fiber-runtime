@@ -63,7 +63,8 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn run(&self) {
+    /// `result_sender`: None if answer not needed
+    pub fn run(&self, result_sender: Option<Sender<SendableResult>>) {
         while let Ok(task) = self.task_queue.recv() {
             // WARNING: this blocks a thread using thread::park(), which ultimately interact with the OS,
             // like futex(fast userspace mutex) for Unix/FreeBSD/Android.
@@ -93,12 +94,37 @@ impl Executor {
                         // or replace the old, finished Future inside a Task with the new Future to be executed(next step)
                     }
                     Poll::Ready(result) => {
-                        // (*task.result.borrow_mut()) = Some(result);
-                        // TODO: send the result by channel or something more efficient
+                        println!("[DEBUG] Future ready");
+                        if let Some(receiver) = result_sender.clone() {
+                            receiver.send(result);
+                        } else {
+                            /// For debug only
+                            println!("[DEBUG] Unused result: {:?}", result)
+                        }
                     }
                 }
             }
         }
+    }
+
+    pub fn run_once(&self) -> SendableResult{
+        while let Ok(task) = self.task_queue.recv() {
+            let mut future_slot = task.future.borrow_mut(); // The only position where a future unboxing occured.
+            if let Some(mut future) = future_slot.take() {
+                // Store the waker for itself (i.e. a fancy callback to re-push itself into the task queue)
+                let waker = waker_ref(&task);
+                let context = &mut Context::from_waker(&waker);
+                match future.as_mut().poll(context) {
+                    Poll::Pending => {
+                        *future_slot = Some(future);
+                    }
+                    Poll::Ready(result) => {
+                        return result;
+                    }
+                }
+            }
+        }
+        panic!("No future to execute");
     }
 }
 
@@ -112,7 +138,7 @@ pub struct Spawner<T> {
 }
 
 impl<T: Send + 'static> Spawner<T> {
-    pub fn spawn(&self, future: impl Future<Output = T> + 'static + Send) {
+    pub fn spawn(&self, future: impl Future<Output = T> + Send + 'static) {
         let future = future.boxed();
         let task = Arc::new(Task {
             future: RefCell::new(Some(Box::pin(
@@ -125,9 +151,16 @@ impl<T: Send + 'static> Spawner<T> {
     }
 }
 
-pub fn new_executor_and_spawner<T>() -> (Executor, Spawner<T>) {
+/// `capacity`: 0 for infinity
+pub fn new_executor_and_spawner<T>(capacity: usize) -> (Executor, Spawner<T>) {
     // MPMC executor and spawner, use it every where by .clone()
-    let (task_sender, task_receiver) = unbounded();
+    let (task_sender, task_receiver) = {
+        if capacity == 0 {
+            unbounded()
+        } else {
+            bounded(capacity)
+        }
+    };
     (
         Executor {
             task_queue: task_receiver,
@@ -140,8 +173,12 @@ pub fn new_executor_and_spawner<T>() -> (Executor, Spawner<T>) {
     )
 }
 
-// pub fn block_on<SendableResult>(
-//     future: impl Future<Output = SendableResult> + 'static + Send,
-// ) -> SendableResult {
-//     let (task_sender, ready_queue) = bounded(1);
-// }
+pub fn block_on<T: Send + 'static>(future: impl Future<Output = T> + 'static + Send) -> T {
+    let (ex, sp) = new_executor_and_spawner(1);
+    sp.spawn(future);
+    drop(sp); // Neccessary to close the channel, otherwise the executor will wait forever
+    match ex.run_once().downcast::<T>() {
+        Ok(res) => *res,
+        Err(_) => panic!(),
+    }
+}
