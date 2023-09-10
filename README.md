@@ -20,7 +20,7 @@ You can use crate `with_locals` to do Continuation-Passing Style(CPS) programmin
 
 - No Mutex
 - Light-weighted (no long spinning)
-- 
+- **Accepts non `()` return value from future**
 
 ## Design
 
@@ -38,11 +38,12 @@ Thread-per-core is recommended, as they are equivalently accepting tasks if avai
 
 ### TODOs
 
-- Non-void return value
 - Convenient macros
   - block_on!
   - join!
+  - select!
   - async main
+  - combinators like `.then()` `.and_then()` `.map()`
 
 ### Benchmarks
 

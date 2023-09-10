@@ -39,6 +39,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "futures",
+ "futures-util",
  "sha1",
 ]
 
