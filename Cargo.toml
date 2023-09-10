@@ -7,10 +7,17 @@ authors = ["CubicYYY<yyy2015c01@gmail.com>"]
 [dependencies]
 crossbeam-channel = "0.5"
 futures = "0.3"
+futures-util = "0.3"
 sha1 = "0.6" # for heavy load example
 
 [profile.release]
+opt-level = 3
 debug = true
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = 'unwind'
+incremental = false
 
 [[example]]
 name = "sleep"
