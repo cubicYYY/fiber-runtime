@@ -61,6 +61,8 @@ Thread-per-core is recommended, as they are equivalently accepting tasks if avai
 
 - Combinators like `.then()` `.and_then()` `.map()`
 - Worker pool
+- Using Type Alias Impl Trait(TAIT) to avoid redundant boxing/allocations (only available in rust nightly channel)
+  - Which will make rust be able to represent Higher-Kinded Type(HKT) pattern :)
 
 ### Benchmarks
 

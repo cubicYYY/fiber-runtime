@@ -16,6 +16,7 @@ use std::{
     time::Duration,
 };
 
+/// TODO: replace it with `impl Send` when Type Alias Impl Trait(TAIT) feature becomes stable
 pub type SendableResult = Box<dyn Any + Send>;
 
 /// Either a boxed Future with dynamic typing, or a None acts as a terminator for a task queue.
