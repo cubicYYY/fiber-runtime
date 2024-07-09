@@ -17,7 +17,7 @@ use std::{
 };
 
 /// TODO: replace it with `impl Send` when Type Alias Impl Trait(TAIT) feature becomes stable
-pub type SendableResult = Box<dyn Any + Send>;
+pub type SendableResultBox = Box<dyn Any + Send>;
 
 /// Either a boxed Future with dynamic typing, or a None acts as a terminator for a task queue.
 ///
@@ -32,7 +32,7 @@ pub struct Task {
     /// This is the only source that causes Task `!Sync`.
     /// We ensure the safety by only allow a future inside Task
     /// can only be unboxed by one specfic worker thread.
-    future: RefCell<Option<BoxFuture<'static, SendableResult>>>,
+    future: RefCell<Option<BoxFuture<'static, SendableResultBox>>>,
 
     // result: RefCell<Option<SendableResult>>,
     /// Entrance to the queue
@@ -62,12 +62,12 @@ impl ArcWake for Task {
 pub struct Executor {
     pub task_queue: Receiver<Arc<Task>>,
     /// `!Send` and `!Sync`
-    _marker: PhantomData<Receiver<Box<dyn Any + Send>>>,
+    _marker: PhantomData<Receiver<SendableResultBox>>,
 }
 
 impl Executor {
     /// `result_sender`: None if answer not needed
-    pub fn run(&self, result_sender: Option<Sender<SendableResult>>) {
+    pub fn run(&self, result_sender: Option<Sender<SendableResultBox>>) {
         while let Ok(task) = self.task_queue.recv() {
             // WARNING: this blocks a thread using thread::park(), which ultimately interact with the OS,
             // like futex(fast userspace mutex) for Unix/FreeBSD/Android.
@@ -81,9 +81,8 @@ impl Executor {
                 let context = &mut Context::from_waker(&waker);
                 match future.as_mut().poll(context) {
                     Poll::Pending => {
-                        // If the future is not ready, replace the old future with the new one(i.e. next step).
-                        // Remember: an "async" is just monads(with continuation insides),
-                        // that is to perform a transform from a functor to another functor.
+                        // If the future is not ready, replace the old future with the new one that will do next steps(i.e. continuation).
+                        // You can call them "monads" (with continuation insides),
                         // E.g. a Future: (input)A->Result, with a single awaiting inside(accept type B)
                         // |---Functor old (Monad A): A->Monad B
                         // ↓
@@ -110,7 +109,7 @@ impl Executor {
         }
     }
 
-    pub fn run_once(&self) -> SendableResult {
+    pub fn run_once(&self) -> SendableResultBox {
         while let Ok(task) = self.task_queue.recv() {
             let mut future_slot = task.future.borrow_mut(); // The only position where a future unboxing occured.
             if let Some(mut future) = future_slot.take() {
@@ -145,7 +144,7 @@ impl<T: Send + 'static> Spawner<T> {
         let future = future.boxed();
         let task = Arc::new(Task {
             future: RefCell::new(Some(Box::pin(
-                future.map(|t| Box::new(t) as SendableResult),
+                future.map(|t| Box::new(t) as SendableResultBox),
             ))),
             loopback_entrance: self.queue_entrance.clone(),
             // result: RefCell::new(None),

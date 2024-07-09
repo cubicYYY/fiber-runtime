@@ -27,7 +27,7 @@ fiber_main! {
         )
     });
 
-    // select! racing result. You will see the unfinished 
+    // select! racing result. You will see the unfinished
     for _ in 0..32{
         let launch1 = async {
         TimerFuture::new(Duration::from_secs(1)).await;
