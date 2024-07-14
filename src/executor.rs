@@ -28,11 +28,7 @@ pub type SendableResultBox = Box<dyn Any + Send>;
 pub struct Task {
     /// If the Option = None, it indicates a terminate signal for the task queue.
     /// Pinned, since Task may be self-pointed.
-    ///
-    /// This is the only source that causes Task `!Sync`.
-    /// We ensure the safety by only allow a future inside Task
-    /// can only be unboxed by one specfic worker thread.
-    future: RefCell<Option<BoxFuture<'static, SendableResultBox>>>,
+    future: Mutex<Option<BoxFuture<'static, SendableResultBox>>>,
 
     // result: RefCell<Option<SendableResult>>,
     /// Entrance to the queue
@@ -40,7 +36,6 @@ pub struct Task {
 }
 
 /// SAFETY: We only access a task.future in a corresponding worker thread
-unsafe impl Sync for Task {}
 
 impl ArcWake for Task {
     /// Modern async runtimes(e.g. tokio) using wake ref to avoid heap allocation.
@@ -74,7 +69,7 @@ impl Executor {
             // It is way faster than the condvar version implementation,
             // Since a short spin(exponential) will avoid most syscalls under intensive workload.
 
-            let mut future_slot = task.future.borrow_mut(); // The only position where a future unboxing occured.
+            let mut future_slot = task.future.lock().unwrap(); // The only position where a future unboxing occured.
             if let Some(mut future) = future_slot.take() {
                 // Store the waker for itself (i.e. a fancy callback to re-push itself into the task queue)
                 let waker = waker_ref(&task);
@@ -111,7 +106,7 @@ impl Executor {
 
     pub fn run_once(&self) -> SendableResultBox {
         while let Ok(task) = self.task_queue.recv() {
-            let mut future_slot = task.future.borrow_mut(); // The only position where a future unboxing occured.
+            let mut future_slot = task.future.lock().unwrap(); // The only position where a future unboxing occured.
             if let Some(mut future) = future_slot.take() {
                 // Store the waker for itself (i.e. a fancy callback to re-push itself into the task queue)
                 let waker = waker_ref(&task);
@@ -143,7 +138,7 @@ impl<T: Send + 'static> Spawner<T> {
     pub fn spawn(&self, future: impl Future<Output = T> + Send + 'static) {
         let future = future.boxed();
         let task = Arc::new(Task {
-            future: RefCell::new(Some(Box::pin(
+            future: Mutex::new(Some(Box::pin(
                 future.map(|t| Box::new(t) as SendableResultBox),
             ))),
             loopback_entrance: self.queue_entrance.clone(),
