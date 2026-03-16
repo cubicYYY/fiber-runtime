@@ -24,7 +24,6 @@ fn main() {
         let cloned = executor.clone();
         threads.push(thread::spawn(move || {
             cloned.run();
-            println!("Thread {:?} quits.", thread::current().id());
         }));
     }
 

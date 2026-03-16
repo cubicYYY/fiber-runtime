@@ -5,8 +5,9 @@ use futures::{
 };
 use std::{
     future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
-    task::Context,
+    task::{Context, Poll, Waker},
 };
 
 /// A task wrapping a boxed future that can be re-enqueued via its waker.
@@ -72,14 +73,71 @@ pub struct Spawner {
 }
 
 impl Spawner {
+    /// Spawn a future that returns `()` (fire-and-forget).
     pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
+        self.spawn_inner(future.boxed());
+    }
+
+    /// Spawn a future and return a [`JoinHandle`] to `.await` its result.
+    pub fn spawn_with_handle<T: Send + 'static>(
+        &self,
+        future: impl Future<Output = T> + Send + 'static,
+    ) -> JoinHandle<T> {
+        let state = Arc::new(Mutex::new(JoinState {
+            result: None,
+            waker: None,
+        }));
+        let state_clone = state.clone();
+        self.spawn_inner(
+            async move {
+                let result = future.await;
+                let mut s = state_clone.lock().unwrap();
+                s.result = Some(result);
+                if let Some(waker) = s.waker.take() {
+                    waker.wake();
+                }
+            }
+            .boxed(),
+        );
+        JoinHandle { state }
+    }
+
+    fn spawn_inner(&self, future: BoxFuture<'static, ()>) {
         let task = Arc::new(Task {
-            future: Mutex::new(Some(future.boxed())),
+            future: Mutex::new(Some(future)),
             loopback_entrance: self.queue_entrance.clone(),
         });
         self.queue_entrance
             .send(task)
             .expect("Executor has been dropped");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JoinHandle
+// ---------------------------------------------------------------------------
+
+struct JoinState<T> {
+    result: Option<T>,
+    waker: Option<Waker>,
+}
+
+/// A handle to a spawned task. `.await` it to retrieve the task's return value.
+pub struct JoinHandle<T> {
+    state: Arc<Mutex<JoinState<T>>>,
+}
+
+impl<T: Send + 'static> Future for JoinHandle<T> {
+    type Output = T;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
+        let mut state = self.state.lock().unwrap();
+        if let Some(result) = state.result.take() {
+            Poll::Ready(result)
+        } else {
+            state.waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
     }
 }
 
