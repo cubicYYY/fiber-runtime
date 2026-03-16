@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use fiber_runtime::{block_on, fiber_main, timer_future::TimerFuture};
 use futures::{join, select};
-use futures_util::FutureExt;
+use futures::FutureExt;
 
 async fn demo() {
     TimerFuture::new(Duration::from_secs(5)).await;

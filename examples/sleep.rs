@@ -23,5 +23,5 @@ fn main() {
     // No more jobs
     drop(spawner);
 
-    executor.run(None);
+    executor.run();
 }

@@ -23,7 +23,7 @@ fn main() {
     for _ in 0..available_parallelism().unwrap().get() {
         let cloned = executor.clone();
         threads.push(thread::spawn(move || {
-            cloned.run(None);
+            cloned.run();
             println!("Thread {:?} quits.", thread::current().id());
         }));
     }

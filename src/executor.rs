@@ -3,179 +3,117 @@ use futures::{
     future::{BoxFuture, FutureExt},
     task::{waker_ref, ArcWake},
 };
-use futures_util::future::Pending;
 use std::{
-    any::Any,
-    cell::{RefCell, UnsafeCell},
-    error::Error,
     future::Future,
-    marker::PhantomData,
-    pin::Pin,
     sync::{Arc, Mutex},
-    task::{Context, Poll},
-    time::Duration,
+    task::Context,
 };
 
-/// TODO: replace it with `impl Send` when Type Alias Impl Trait(TAIT) feature becomes stable
-pub type SendableResultBox = Box<dyn Any + Send>;
-
-/// Either a boxed Future with dynamic typing, or a None acts as a terminator for a task queue.
+/// A task wrapping a boxed future that can be re-enqueued via its waker.
 ///
-/// WARNING: user should NEVER sync Task between threads:
-///
-/// this trait is added only to implement ArcWake trait.
-/// The safety is ensured by lib developers as a library private/inner class and should never be exposed.
-pub struct Task {
-    /// If the Option = None, it indicates a terminate signal for the task queue.
-    /// Pinned, since Task may be self-pointed.
-    future: Mutex<Option<BoxFuture<'static, SendableResultBox>>>,
+/// All tasks produce `()`. To retrieve a typed result from `block_on`,
+/// the future is wrapped in an adapter that sends the value through a channel.
+struct Task {
+    /// `None` after the future completes or is taken for polling.
+    future: Mutex<Option<BoxFuture<'static, ()>>>,
 
-    // result: RefCell<Option<SendableResult>>,
-    /// Entrance to the queue
+    /// Cloned sender used by the waker to re-enqueue this task.
     loopback_entrance: Sender<Arc<Task>>,
 }
 
-/// SAFETY: We only access a task.future in a corresponding worker thread
-
 impl ArcWake for Task {
-    /// Modern async runtimes(e.g. tokio) using wake ref to avoid heap allocation.
-    /// So DO NOT use ::will_wake().
+    /// Modern async runtimes (e.g. tokio) use waker refs to avoid heap allocation,
+    /// so DO NOT rely on `Waker::will_wake()`.
     fn wake_by_ref(arc_self: &Arc<Self>) {
-        // Push self back to the task queue
         let cloned = arc_self.clone();
-        match arc_self.loopback_entrance.send(cloned) {
-            Ok(_) => (),
-            Err(_) => {
-                println!("[DEBUG] Unfinished task dropped.");
-            }
-        }
+        // Send errors occur during normal shutdown when the receiver is dropped.
+        let _ = arc_self.loopback_entrance.send(cloned);
     }
 }
 
-/// Multiple comsumers
+/// Pulls tasks from a shared queue and polls them to completion.
+///
+/// Multiple `Executor` clones can run on different threads (MPMC pattern).
 #[derive(Clone)]
 pub struct Executor {
-    pub task_queue: Receiver<Arc<Task>>,
-    /// `!Send` and `!Sync`
-    _marker: PhantomData<Receiver<SendableResultBox>>,
+    task_queue: Receiver<Arc<Task>>,
 }
 
 impl Executor {
-    /// `result_sender`: None if answer not needed
-    pub fn run(&self, result_sender: Option<Sender<SendableResultBox>>) {
+    /// Run the executor loop until all senders (spawners + in-flight task wakers) are dropped.
+    ///
+    /// This blocks the calling thread. The channel's `recv()` spins briefly before
+    /// falling back to `thread::park()`, avoiding expensive syscalls under load.
+    pub fn run(&self) {
         while let Ok(task) = self.task_queue.recv() {
-            // WARNING: this blocks a thread using thread::park(), which ultimately interact with the OS,
-            // like futex(fast userspace mutex) for Unix/FreeBSD/Android.
-            // It is way faster than the condvar version implementation,
-            // Since a short spin(exponential) will avoid most syscalls under intensive workload.
-
-            let mut future_slot = task.future.lock().unwrap(); // The only position where a future unboxing occured.
+            let mut future_slot = task.future.lock().unwrap();
             if let Some(mut future) = future_slot.take() {
-                // Store the waker for itself (i.e. a fancy callback to re-push itself into the task queue)
                 let waker = waker_ref(&task);
                 let context = &mut Context::from_waker(&waker);
-                match future.as_mut().poll(context) {
-                    Poll::Pending => {
-                        // If the future is not ready, replace the old future with the new one that will do next steps(i.e. continuation).
-                        // You can call them "monads" (with continuation insides),
-                        // E.g. a Future: (input)A->Result, with a single awaiting inside(accept type B)
-                        // |---Functor old (Monad A): A->Monad B
-                        // ↓
-                        *future_slot = Some(future);
-                        // ↓
-                        // →---Functor new (Monad B): B->Result
-
-                        // Each transform is (equivalent statements):
-                        // A step in the finite-state machine bind to the Future;
-                        // or a stage across an await(inside Future function body);
-                        // or replace the old, finished Future inside a Task with the new Future to be executed(next step)
-                    }
-                    Poll::Ready(result) => {
-                        println!("[DEBUG] Future ready");
-                        if let Some(receiver) = result_sender.clone() {
-                            receiver.send(result);
-                        } else {
-                            /// For debug only
-                            println!("[DEBUG] Unused result: {:?}", result)
-                        }
-                    }
+                // If still pending, put the continuation back for the next wake.
+                //
+                // Each poll may advance the future's internal state machine by one step
+                // (i.e. across one `.await` point). The waker re-enqueues the task
+                // when the awaited resource becomes ready.
+                if future.as_mut().poll(context).is_pending() {
+                    *future_slot = Some(future);
                 }
             }
         }
-    }
-
-    pub fn run_once(&self) -> SendableResultBox {
-        while let Ok(task) = self.task_queue.recv() {
-            let mut future_slot = task.future.lock().unwrap(); // The only position where a future unboxing occured.
-            if let Some(mut future) = future_slot.take() {
-                // Store the waker for itself (i.e. a fancy callback to re-push itself into the task queue)
-                let waker = waker_ref(&task);
-                let context = &mut Context::from_waker(&waker);
-                match future.as_mut().poll(context) {
-                    Poll::Pending => {
-                        *future_slot = Some(future);
-                    }
-                    Poll::Ready(result) => {
-                        return result;
-                    }
-                }
-            }
-        }
-        panic!("No future to execute");
     }
 }
 
-/// Multiple producers
+/// Submits futures as tasks into the shared queue.
+///
+/// Multiple `Spawner` clones can submit from different threads (MPMC pattern).
 #[derive(Clone)]
-pub struct Spawner<T> {
+pub struct Spawner {
     queue_entrance: Sender<Arc<Task>>,
-
-    /// `!Send` and `!Sync`
-    _marker: PhantomData<Sender<T>>,
 }
 
-impl<T: Send + 'static> Spawner<T> {
-    pub fn spawn(&self, future: impl Future<Output = T> + Send + 'static) {
-        let future = future.boxed();
+impl Spawner {
+    pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
         let task = Arc::new(Task {
-            future: Mutex::new(Some(Box::pin(
-                future.map(|t| Box::new(t) as SendableResultBox),
-            ))),
+            future: Mutex::new(Some(future.boxed())),
             loopback_entrance: self.queue_entrance.clone(),
-            // result: RefCell::new(None),
         });
-        self.queue_entrance.send(task).expect("Task queue full!");
+        self.queue_entrance
+            .send(task)
+            .expect("Executor has been dropped");
     }
 }
 
-/// `capacity`: 0 for infinity
-pub fn new_executor_and_spawner<T>(capacity: usize) -> (Executor, Spawner<T>) {
-    // MPMC executor and spawner, use it every where by .clone()
-    let (task_sender, task_receiver) = {
-        if capacity == 0 {
-            unbounded()
-        } else {
-            bounded(capacity)
-        }
+/// Create a paired executor and spawner.
+///
+/// `capacity`: 0 for an unbounded queue.
+pub fn new_executor_and_spawner(capacity: usize) -> (Executor, Spawner) {
+    let (task_sender, task_receiver) = if capacity == 0 {
+        unbounded()
+    } else {
+        bounded(capacity)
     };
     (
         Executor {
             task_queue: task_receiver,
-            _marker: PhantomData,
         },
         Spawner {
             queue_entrance: task_sender,
-            _marker: PhantomData,
         },
     )
 }
 
-pub fn block_on<T: Send + 'static>(future: impl Future<Output = T> + 'static + Send) -> T {
+/// Run a future to completion on a fresh single-task executor, returning its result.
+///
+/// A typed crossbeam channel is used to shuttle the result back, avoiding
+/// `Box<dyn Any>` and `downcast`.
+pub fn block_on<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> T {
+    let (result_tx, result_rx) = bounded(1);
     let (ex, sp) = new_executor_and_spawner(1);
-    sp.spawn(future);
-    drop(sp); // Neccessary to close the channel, otherwise the executor will wait forever
-    match ex.run_once().downcast::<T>() {
-        Ok(res) => *res,
-        Err(_) => panic!(),
-    }
+    sp.spawn(async move {
+        let result = future.await;
+        let _ = result_tx.send(result);
+    });
+    drop(sp); // Necessary to close the channel, otherwise the executor blocks forever
+    ex.run();
+    result_rx.recv().expect("Future did not produce a result")
 }
